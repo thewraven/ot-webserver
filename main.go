@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/thewraven/ot-webserver/cache"
+	"github.com/thewraven/ot-webserver/sqlite"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -85,6 +87,10 @@ func (o otFib) serveFib(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, out)
 }
 
+func addInstrumentation(name string, fn http.HandlerFunc) http.Handler {
+	return otelhttp.NewHandler(http.HandlerFunc(fn), name)
+}
+
 func main() {
 	close := initTracer()
 	defer close()
@@ -92,8 +98,8 @@ func main() {
 	cache := NewCached(mathFib{})
 	fb := otFib{ot: cache}
 	sess := initSession()
-	mux.Handle("/fib", otelhttp.NewHandler(http.HandlerFunc(fb.serveFib), "fibEndpoint"))
-	mux.Handle("/get", otelhttp.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/fib", addInstrumentation("fibEndpoint", fb.serveFib))
+	mux.Handle("/get", addInstrumentation("getData", func(w http.ResponseWriter, r *http.Request) {
 		d, err := sess.Get(r.Context(), r.URL.Query().Get("key"))
 		if err != nil {
 			span := trace.SpanFromContext(r.Context())
@@ -101,9 +107,9 @@ func main() {
 			fmt.Fprintln(w, err.Error())
 			return
 		}
-		fmt.Println(d)
-	}), "getData"))
-	mux.Handle("/write", otelhttp.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, d)
+	}))
+	mux.Handle("/write", addInstrumentation("writeData", func(w http.ResponseWriter, r *http.Request) {
 		info, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			span := trace.SpanFromContext(r.Context())
@@ -121,7 +127,20 @@ func main() {
 			return
 		}
 		fmt.Fprintln(w, len(info), "bytes written")
-	}), "writeData"))
+	}))
+	db, err := sqlite.New()
+	if err != nil {
+		panic(err)
+	}
+	mux.Handle("/users", addInstrumentation("getUsers", func(w http.ResponseWriter, r *http.Request) {
+		u, err := db.FindUser(r.Context(), r.URL.Query().Get("id"))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintln(w, err.Error())
+			return
+		}
+		json.NewEncoder(w).Encode(u)
+	}))
 	log.Println("Listening at address", addr)
 	http.ListenAndServe(addr, mux)
 }
