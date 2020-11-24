@@ -9,8 +9,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/bradfitz/gomemcache/memcache"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/bradfitz/gomemcache/memcache/otelmemcache"
+	"github.com/thewraven/ot-webserver/cache"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -128,7 +127,7 @@ func main() {
 }
 
 func initSession() Session {
-	return NewSession("localhost:11211", "sessionService")
+	return cache.NewSession("localhost:11211", "sessionService")
 }
 
 func initTracer() func() {
@@ -147,53 +146,8 @@ func initTracer() func() {
 	return flush
 }
 
-type cache struct {
-	mem *otelmemcache.Client
-}
-
 type Session interface {
 	Save(ctx context.Context, k string, v []byte) error
 	Get(ctx context.Context, k string) ([]byte, error)
 	Drop(ctx context.Context, k string) error
-}
-
-func NewSession(addr string, service string) *cache {
-	cl := memcache.New(addr)
-	ct := otelmemcache.NewClientWithTracing(cl, otelmemcache.WithServiceName(service))
-	return &cache{mem: ct}
-}
-
-func (c *cache) Save(ctx context.Context, k string, v []byte) error {
-	item := memcache.Item{Key: k, Value: v}
-	err := c.mem.Add(&item)
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		defer span.End(trace.WithRecord())
-		span.RecordError(err)
-		return err
-	}
-	return nil
-}
-
-func (c *cache) Get(ctx context.Context, k string) ([]byte, error) {
-	i, err := c.mem.Get(k)
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		defer span.End(trace.WithRecord())
-		span.RecordError(err)
-		return nil, err
-	}
-	return i.Value, nil
-}
-
-func (c *cache) Drop(ctx context.Context, k string) error {
-	err := c.mem.Delete(k)
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		defer span.End(trace.WithRecord())
-		span.SetAttributes(label.String("undeletedKey", k))
-		span.RecordError(err)
-		return err
-	}
-	return nil
 }
