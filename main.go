@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 
+	"github.com/bradfitz/gomemcache/memcache"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/bradfitz/gomemcache/memcache/otelmemcache"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -89,9 +92,43 @@ func main() {
 	mux := http.NewServeMux()
 	cache := NewCached(mathFib{})
 	fb := otFib{ot: cache}
+	sess := initSession()
 	mux.Handle("/fib", otelhttp.NewHandler(http.HandlerFunc(fb.serveFib), "fibEndpoint"))
+	mux.Handle("/get", otelhttp.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d, err := sess.Get(r.Context(), r.URL.Query().Get("key"))
+		if err != nil {
+			span := trace.SpanFromContext(r.Context())
+			defer span.End(trace.WithRecord())
+			fmt.Fprintln(w, err.Error())
+			return
+		}
+		fmt.Println(d)
+	}), "getData"))
+	mux.Handle("/write", otelhttp.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		info, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			span := trace.SpanFromContext(r.Context())
+			defer span.End(trace.WithRecord())
+			fmt.Fprintln(w, err.Error())
+			return
+		}
+		k := r.URL.Query().Get("key")
+		err = sess.Save(r.Context(), k, info)
+		if err != nil {
+			span := trace.SpanFromContext(r.Context())
+			span.SetAttributes(label.String("unrecordedValue", k))
+			defer span.End(trace.WithRecord())
+			fmt.Fprintln(w, err.Error())
+			return
+		}
+		fmt.Fprintln(w, len(info), "bytes written")
+	}), "writeData"))
 	log.Println("Listening at address", addr)
 	http.ListenAndServe(addr, mux)
+}
+
+func initSession() Session {
+	return NewSession("localhost:11211", "sessionService")
 }
 
 func initTracer() func() {
@@ -108,4 +145,55 @@ func initTracer() func() {
 		panic(err)
 	}
 	return flush
+}
+
+type cache struct {
+	mem *otelmemcache.Client
+}
+
+type Session interface {
+	Save(ctx context.Context, k string, v []byte) error
+	Get(ctx context.Context, k string) ([]byte, error)
+	Drop(ctx context.Context, k string) error
+}
+
+func NewSession(addr string, service string) *cache {
+	cl := memcache.New(addr)
+	ct := otelmemcache.NewClientWithTracing(cl, otelmemcache.WithServiceName(service))
+	return &cache{mem: ct}
+}
+
+func (c *cache) Save(ctx context.Context, k string, v []byte) error {
+	item := memcache.Item{Key: k, Value: v}
+	err := c.mem.Add(&item)
+	if err != nil {
+		span := trace.SpanFromContext(ctx)
+		defer span.End(trace.WithRecord())
+		span.RecordError(err)
+		return err
+	}
+	return nil
+}
+
+func (c *cache) Get(ctx context.Context, k string) ([]byte, error) {
+	i, err := c.mem.Get(k)
+	if err != nil {
+		span := trace.SpanFromContext(ctx)
+		defer span.End(trace.WithRecord())
+		span.RecordError(err)
+		return nil, err
+	}
+	return i.Value, nil
+}
+
+func (c *cache) Drop(ctx context.Context, k string) error {
+	err := c.mem.Delete(k)
+	if err != nil {
+		span := trace.SpanFromContext(ctx)
+		defer span.End(trace.WithRecord())
+		span.SetAttributes(label.String("undeletedKey", k))
+		span.RecordError(err)
+		return err
+	}
+	return nil
 }
