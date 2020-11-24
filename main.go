@@ -8,10 +8,10 @@ import (
 	"os"
 	"strconv"
 
-	"go.opentelemetry.io/otel/api/global"
-	"go.opentelemetry.io/otel/api/trace"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otel/exporters/trace/jaeger"
 	"go.opentelemetry.io/otel/label"
@@ -37,7 +37,8 @@ func (c cachedFib) Fib(ctx context.Context, n int) int {
 	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "cachedSpan")
 	defer span.End()
 	if v, ok := c.values[n]; ok {
-		span.AddEvent(ctx, "value cached", label.Int("f", n))
+		span.AddEvent("value cached",
+			trace.WithAttributes(label.Int("f", n)))
 		return v
 	}
 	v := c.impl.Fib(ctx, n)
@@ -67,32 +68,28 @@ func (o otFib) Fib(ctx context.Context, n int) int {
 	return o.ot.Fib(ctx, n)
 }
 
+func (o otFib) serveFib(w http.ResponseWriter, r *http.Request) {
+	span := trace.SpanFromContext(r.Context())
+	defer span.End()
+	n := r.URL.Query().Get("n")
+	f, err := strconv.Atoi(n)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(w, "Input is not a number", n)
+		return
+	}
+	out := o.Fib(r.Context(), f)
+	fmt.Fprintln(w, out)
+}
+
 func main() {
 	close := initTracer()
 	defer close()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		_, span := global.Tracer(serviceName).Start(r.Context(), "/echo")
-		defer span.End()
-		fmt.Fprintf(w, "Service OK")
-	})
 	cache := NewCached(mathFib{})
 	fb := otFib{ot: cache}
-	mux.HandleFunc("/fib", func(w http.ResponseWriter, r *http.Request) {
-		ctx, span := global.Tracer(serviceName).Start(r.Context(), "/fib")
-		defer span.End()
-		n := r.URL.Query().Get("n")
-		f, err := strconv.Atoi(n)
-		if err != nil {
-			span.RecordError(ctx, err)
-			span.SetStatus(codes.Error, err.Error())
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintln(w, "Input is not a number", n)
-			return
-		}
-		out := fb.Fib(ctx, f)
-		fmt.Fprintln(w, out)
-	})
+	mux.Handle("/fib", otelhttp.NewHandler(http.HandlerFunc(fb.serveFib), "fibEndpoint"))
 	log.Println("Listening at address", addr)
 	http.ListenAndServe(addr, mux)
 }
