@@ -9,6 +9,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/smacker/opentracing-gorm v0.0.0-20181207094635-cd4974441042
 	go.opentelemetry.io/contrib/instrumentation/github.com/bradfitz/gomemcache/memcache/otelmemcache v0.14.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.14.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.14.0
 	go.opentelemetry.io/otel v0.14.0
 	go.opentelemetry.io/otel/exporters/trace/jaeger v0.14.0
