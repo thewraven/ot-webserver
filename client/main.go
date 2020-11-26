@@ -14,12 +14,11 @@ import (
 	"time"
 
 	"github.com/honeycombio/opentelemetry-exporter-go/honeycomb"
+	"github.com/lightstep/otel-launcher-go/launcher"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/api/global"
-	"go.opentelemetry.io/otel/propagators"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"go.opentelemetry.io/otel/label"
 )
@@ -36,7 +35,7 @@ type User struct {
 
 func main() {
 	rand.Seed(time.Now().Unix())
-	closeTracer := initTracer(initHoneycomb())
+	closeTracer := initTracer()
 	defer closeTracer()
 	cl := &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
@@ -148,16 +147,7 @@ func initHoneycomb() *honeycomb.Exporter {
 	return ex
 }
 
-func initTracer(exporter *honeycomb.Exporter) func() {
-	bsp := sdktrace.NewBatchSpanProcessor(exporter)
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(bsp), sdktrace.WithSyncer(exporter))
-	tp.ApplyConfig(
-		sdktrace.Config{
-			DefaultSampler: sdktrace.AlwaysSample(),
-		})
-	global.SetTextMapPropagator(
-		otel.NewCompositeTextMapPropagator(propagators.Baggage{}, propagators.TraceContext{}),
-	)
-	global.SetTracerProvider(tp)
-	return bsp.Shutdown
+func initTracer() func() {
+	otel := launcher.ConfigureOpentelemetry()
+	return func() { otel.Shutdown() }
 }

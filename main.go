@@ -11,15 +11,13 @@ import (
 	"strconv"
 
 	"github.com/honeycombio/opentelemetry-exporter-go/honeycomb"
+	"github.com/lightstep/otel-launcher-go/launcher"
 	"github.com/thewraven/ot-webserver/cache"
 	"github.com/thewraven/ot-webserver/sqlite"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/api/global"
 	"go.opentelemetry.io/otel/api/trace"
 	"go.opentelemetry.io/otel/label"
-	"go.opentelemetry.io/otel/propagators"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 var serviceName = os.Getenv("SERVICE_NAME")
@@ -122,7 +120,7 @@ func login(s Session, conn *sqlite.Conn) http.HandlerFunc {
 }
 
 func main() {
-	cl := initTracer(initHoneycomb())
+	cl := initTracer()
 	defer cl()
 	mux := http.NewServeMux()
 	cache := NewCached(mathFib{})
@@ -195,18 +193,9 @@ func initHoneycomb() *honeycomb.Exporter {
 	return ex
 }
 
-func initTracer(exporter *honeycomb.Exporter) func() {
-	bsp := sdktrace.NewBatchSpanProcessor(exporter)
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(bsp))
-	tp.ApplyConfig(
-		sdktrace.Config{
-			DefaultSampler: sdktrace.AlwaysSample(),
-		})
-	global.SetTextMapPropagator(
-		otel.NewCompositeTextMapPropagator(propagators.Baggage{}, propagators.TraceContext{}),
-	)
-	global.SetTracerProvider(tp)
-	return bsp.Shutdown
+func initTracer() func() {
+	otel := launcher.ConfigureOpentelemetry()
+	return func() { otel.Shutdown() }
 }
 
 type Session interface {
