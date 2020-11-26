@@ -20,7 +20,8 @@ func NewSession(addr string, service string) *cache {
 }
 
 func (c *cache) Save(ctx context.Context, k string, v []byte) error {
-	item := memcache.Item{Key: k, Value: v}
+	hour := 60 * 60
+	item := memcache.Item{Key: k, Value: v, Expiration: int32(hour)}
 	err := c.mem.WithContext(ctx).Add(&item)
 	if err != nil {
 		span := trace.SpanFromContext(ctx)

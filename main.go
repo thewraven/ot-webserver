@@ -17,7 +17,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/api/global"
 	"go.opentelemetry.io/otel/api/trace"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/label"
 	"go.opentelemetry.io/otel/propagators"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -73,25 +72,53 @@ func (o otFib) Fib(ctx context.Context, n int) int {
 	return o.ot.Fib(ctx, n)
 }
 
-func (o otFib) serveFib(w http.ResponseWriter, r *http.Request) {
-	span := trace.SpanFromContext(r.Context())
-	fmt.Println(trace.RemoteSpanContextFromContext(r.Context()).TraceID.String())
-	fmt.Println(span.SpanContext().TraceID.String())
-	defer span.End()
-	n := r.URL.Query().Get("n")
-	f, err := strconv.Atoi(n)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, "Input is not a number", n)
-		return
+func (o otFib) serveFib(s Session) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := global.Tracer(serviceName).Start(r.Context(), "fibService")
+		defer span.End()
+		k := r.Header.Get("Authorization")
+		id, err := s.Get(ctx, k)
+		if err != nil || len(id) == 0 {
+			span.RecordError(ctx, err)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		span.SetAttributes(label.String("user", string(id)))
+		n := r.URL.Query().Get("n")
+		f, err := strconv.Atoi(n)
+		if err != nil {
+			span.RecordError(ctx, err)
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintln(w, "Input is not a number", n)
+			return
+		}
+		out := o.Fib(r.Context(), f)
+		fmt.Fprint(w, out)
 	}
-	out := o.Fib(r.Context(), f)
-	fmt.Fprintln(w, out)
 }
 
 func addInstrumentation(name string, fn http.HandlerFunc) http.Handler {
 	return otelhttp.NewHandler(http.HandlerFunc(fn), name)
+}
+
+func login(s Session, conn *sqlite.Conn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := global.Tracer(serviceName).Start(r.Context(), "login")
+		defer span.End()
+		u := r.URL.Query().Get("user")
+		user, err := conn.FindUser(ctx, u)
+		if err != nil {
+			span.RecordError(ctx, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, err.Error())
+			return
+		}
+		s.Save(ctx, user.Key, []byte(user.ID))
+		err = json.NewEncoder(w).Encode(user)
+		if err != nil {
+			span.RecordError(ctx, err)
+		}
+	}
 }
 
 func main() {
@@ -109,7 +136,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	mux.Handle("/fib", addInstrumentation("fibEndpoint", fb.serveFib))
+	mux.Handle("/fib", addInstrumentation("fibEndpoint", fb.serveFib(sess)))
+	mux.Handle("/login", addInstrumentation("login", login(sess, db)))
 	mux.Handle("/get", addInstrumentation("getData", func(w http.ResponseWriter, r *http.Request) {
 		d, err := sess.Get(r.Context(), r.URL.Query().Get("key"))
 		if err != nil {
