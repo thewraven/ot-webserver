@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -138,45 +137,6 @@ func main() {
 	}
 	mux.Handle("/fib", addInstrumentation("fibEndpoint", fb.serveFib(sess)))
 	mux.Handle("/login", addInstrumentation("login", login(sess, db)))
-	mux.Handle("/get", addInstrumentation("getData", func(w http.ResponseWriter, r *http.Request) {
-		d, err := sess.Get(r.Context(), r.URL.Query().Get("key"))
-		if err != nil {
-			span := trace.SpanFromContext(r.Context())
-			defer span.End(trace.WithRecord())
-			fmt.Fprintln(w, err.Error())
-			return
-		}
-		fmt.Fprintln(w, d)
-	}))
-	mux.Handle("/write", addInstrumentation("writeData", func(w http.ResponseWriter, r *http.Request) {
-		info, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			span := trace.SpanFromContext(r.Context())
-			defer span.End(trace.WithRecord())
-			fmt.Fprintln(w, err.Error())
-			return
-		}
-		k := r.URL.Query().Get("key")
-		err = sess.Save(r.Context(), k, info)
-		if err != nil {
-			span := trace.SpanFromContext(r.Context())
-			span.SetAttributes(label.String("unrecordedValue", k))
-			defer span.End(trace.WithRecord())
-			fmt.Fprintln(w, err.Error())
-			return
-		}
-		fmt.Fprintln(w, len(info), "bytes written")
-	}))
-
-	mux.Handle("/users", addInstrumentation("getUsers", func(w http.ResponseWriter, r *http.Request) {
-		u, err := db.FindUser(r.Context(), r.URL.Query().Get("id"))
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintln(w, err.Error())
-			return
-		}
-		json.NewEncoder(w).Encode(u)
-	}))
 	log.Println("Listening at address", addr)
 	http.ListenAndServe(addr, mux)
 }
@@ -184,6 +144,7 @@ func main() {
 func initSession() Session {
 	return cache.NewSession("localhost:11211", "sessionService")
 }
+
 func initHoneycomb() *honeycomb.Exporter {
 	ex, err := honeycomb.NewExporter(
 		honeycomb.Config{
