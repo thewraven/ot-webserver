@@ -16,10 +16,12 @@ type cachedFib struct {
 	values map[int]int
 }
 
-func NewCached(real Fibber) Fibber {
-	return cachedFib{impl: real, values: make(map[int]int)}
+//NewCached returns a fibonacci generator, using the default generator
+func NewCached() Fibber {
+	return cachedFib{impl: New(), values: make(map[int]int)}
 }
 
+//Fib returns the nth fibonacci number
 func (c cachedFib) Fib(ctx context.Context, n int) int {
 	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "cachedSpan")
 	defer span.End()
@@ -34,6 +36,7 @@ func (c cachedFib) Fib(ctx context.Context, n int) int {
 
 type mathFib struct{}
 
+//New returns an untraced fibonacci generator
 func New() Fibber {
 	return mathFib{}
 }
@@ -50,6 +53,7 @@ type otFib struct {
 	ot Fibber
 }
 
+//NewWithTracing instruments a fibonacci generator
 func NewWithTracing(f Fibber) Fibber {
 	return otFib{ot: f}
 }
