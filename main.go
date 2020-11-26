@@ -101,6 +101,14 @@ func main() {
 	cache := NewCached(mathFib{})
 	fb := otFib{ot: cache}
 	sess := initSession()
+	db, err := sqlite.New()
+	if err != nil {
+		panic(err)
+	}
+	err = db.FillDB(context.Background())
+	if err != nil {
+		panic(err)
+	}
 	mux.Handle("/fib", addInstrumentation("fibEndpoint", fb.serveFib))
 	mux.Handle("/get", addInstrumentation("getData", func(w http.ResponseWriter, r *http.Request) {
 		d, err := sess.Get(r.Context(), r.URL.Query().Get("key"))
@@ -131,10 +139,7 @@ func main() {
 		}
 		fmt.Fprintln(w, len(info), "bytes written")
 	}))
-	db, err := sqlite.New()
-	if err != nil {
-		panic(err)
-	}
+
 	mux.Handle("/users", addInstrumentation("getUsers", func(w http.ResponseWriter, r *http.Request) {
 		u, err := db.FindUser(r.Context(), r.URL.Query().Get("id"))
 		if err != nil {
