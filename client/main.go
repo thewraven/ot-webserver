@@ -35,15 +35,15 @@ func main() {
 	rand.Seed(time.Now().Unix())
 	closeTracer := initTracer()
 	defer closeTracer()
-	cl := &http.Client{
+	cl := http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
 	ctx, span := global.Tracer(serviceName).Start(context.Background(), "mathClient")
-	u, err := login(ctx, *cl, "user1")
+	u, err := login(ctx, cl, "user1")
 	if err != nil {
 		panic(err)
 	}
-	addFibs(ctx, *cl, *u)
+	addFibs(ctx, cl, *u)
 	span.End()
 	time.Sleep(time.Second * 3)
 }
@@ -112,7 +112,6 @@ func getFib(ctx context.Context, cl http.Client, u User) (int, error) {
 	ctx = otel.ContextWithBaggageValues(ctx,
 		label.Int("fibInput", fib))
 	ctx, span := global.Tracer(serviceName).Start(ctx, "fibClient")
-	fmt.Println(span.SpanContext().TraceID.String())
 	defer span.End()
 	url := fmt.Sprint(host, "/fib?n=", fib)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
