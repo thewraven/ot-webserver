@@ -10,15 +10,17 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/honeycombio/opentelemetry-exporter-go/honeycomb"
 	"github.com/thewraven/ot-webserver/cache"
 	"github.com/thewraven/ot-webserver/sqlite"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/api/global"
+	"go.opentelemetry.io/otel/api/trace"
 	"go.opentelemetry.io/otel/codes"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
-
-	"go.opentelemetry.io/otel/exporters/trace/jaeger"
 	"go.opentelemetry.io/otel/label"
+	"go.opentelemetry.io/otel/propagators"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 var serviceName = os.Getenv("SERVICE_NAME")
@@ -41,8 +43,7 @@ func (c cachedFib) Fib(ctx context.Context, n int) int {
 	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "cachedSpan")
 	defer span.End()
 	if v, ok := c.values[n]; ok {
-		span.AddEvent("value cached",
-			trace.WithAttributes(label.Int("f", n)))
+		span.AddEvent(ctx, "value cached", label.Int("f", n))
 		return v
 	}
 	v := c.impl.Fib(ctx, n)
@@ -74,6 +75,8 @@ func (o otFib) Fib(ctx context.Context, n int) int {
 
 func (o otFib) serveFib(w http.ResponseWriter, r *http.Request) {
 	span := trace.SpanFromContext(r.Context())
+	fmt.Println(trace.RemoteSpanContextFromContext(r.Context()).TraceID.String())
+	fmt.Println(span.SpanContext().TraceID.String())
 	defer span.End()
 	n := r.URL.Query().Get("n")
 	f, err := strconv.Atoi(n)
@@ -92,8 +95,8 @@ func addInstrumentation(name string, fn http.HandlerFunc) http.Handler {
 }
 
 func main() {
-	close := initTracer()
-	defer close()
+	cl := initTracer(initHoneycomb())
+	defer cl()
 	mux := http.NewServeMux()
 	cache := NewCached(mathFib{})
 	fb := otFib{ot: cache}
@@ -148,21 +151,29 @@ func main() {
 func initSession() Session {
 	return cache.NewSession("localhost:11211", "sessionService")
 }
-
-func initTracer() func() {
-	flush, err := jaeger.InstallNewPipeline(
-		jaeger.WithCollectorEndpoint("http://localhost:14268/api/traces"),
-		jaeger.WithProcess(jaeger.Process{
-			ServiceName: serviceName,
-		}),
-		jaeger.WithSDK(&sdktrace.Config{
-			DefaultSampler: sdktrace.AlwaysSample(),
-		}),
-	)
+func initHoneycomb() *honeycomb.Exporter {
+	ex, err := honeycomb.NewExporter(
+		honeycomb.Config{
+			APIKey: os.Getenv("HONEYCOMB_KEY"),
+		})
 	if err != nil {
 		panic(err)
 	}
-	return flush
+	return ex
+}
+
+func initTracer(exporter *honeycomb.Exporter) func() {
+	bsp := sdktrace.NewBatchSpanProcessor(exporter)
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(bsp))
+	tp.ApplyConfig(
+		sdktrace.Config{
+			DefaultSampler: sdktrace.AlwaysSample(),
+		})
+	global.SetTextMapPropagator(
+		otel.NewCompositeTextMapPropagator(propagators.Baggage{}, propagators.TraceContext{}),
+	)
+	global.SetTracerProvider(tp)
+	return bsp.Shutdown
 }
 
 type Session interface {

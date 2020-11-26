@@ -5,8 +5,8 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/bradfitz/gomemcache/memcache/otelmemcache"
+	"go.opentelemetry.io/otel/api/trace"
 	"go.opentelemetry.io/otel/label"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type cache struct {
@@ -25,7 +25,7 @@ func (c *cache) Save(ctx context.Context, k string, v []byte) error {
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
 		defer span.End(trace.WithRecord())
-		span.RecordError(err)
+		span.RecordError(ctx, err)
 		return err
 	}
 	return nil
@@ -36,7 +36,7 @@ func (c *cache) Get(ctx context.Context, k string) ([]byte, error) {
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
 		defer span.End(trace.WithRecord())
-		span.RecordError(err)
+		span.RecordError(ctx, err)
 		return nil, err
 	}
 	return i.Value, nil
@@ -48,7 +48,7 @@ func (c *cache) Drop(ctx context.Context, k string) error {
 		span := trace.SpanFromContext(ctx)
 		defer span.End(trace.WithRecord())
 		span.SetAttributes(label.String("undeletedKey", k))
-		span.RecordError(err)
+		span.RecordError(ctx, err)
 		return err
 	}
 	return nil

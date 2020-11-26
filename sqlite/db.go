@@ -6,8 +6,8 @@ import (
 
 	"github.com/jinzhu/gorm"
 	otgorm "github.com/smacker/opentracing-gorm"
+	"go.opentelemetry.io/otel/api/trace"
 	"go.opentelemetry.io/otel/label"
-	"go.opentelemetry.io/otel/trace"
 	_ "gorm.io/driver/sqlite"
 )
 
@@ -39,8 +39,8 @@ func (c *Conn) FindUser(ctx context.Context, id string) (*Users, error) {
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
 		defer span.End(trace.WithRecord())
-		span.RecordError(err)
-		span.AddEvent("error finding user", trace.WithAttributes(label.String("userId", id)))
+		span.RecordError(ctx, err)
+		span.AddEvent(ctx, "error finding user", label.String("userId", id))
 		return nil, fmt.Errorf("Cannot find user")
 	}
 	return user, nil
