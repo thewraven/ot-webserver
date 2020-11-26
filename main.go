@@ -10,15 +10,13 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/honeycombio/opentelemetry-exporter-go/honeycomb"
+	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"github.com/thewraven/ot-webserver/cache"
 	"github.com/thewraven/ot-webserver/sqlite"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/api/global"
 	"go.opentelemetry.io/otel/api/trace"
 	"go.opentelemetry.io/otel/label"
-	"go.opentelemetry.io/otel/propagators"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -122,7 +120,7 @@ func login(s Session, conn *sqlite.Conn) http.HandlerFunc {
 }
 
 func main() {
-	cl := initTracer(initHoneycomb())
+	cl := initTrace()
 	defer cl()
 	mux := http.NewServeMux()
 	cache := NewCached(mathFib{})
@@ -184,29 +182,21 @@ func main() {
 func initSession() Session {
 	return cache.NewSession("localhost:11211", "sessionService")
 }
-func initHoneycomb() *honeycomb.Exporter {
-	ex, err := honeycomb.NewExporter(
-		honeycomb.Config{
-			APIKey: os.Getenv("HONEYCOMB_KEY"),
-		})
-	if err != nil {
-		panic(err)
-	}
-	return ex
-}
 
-func initTracer(exporter *honeycomb.Exporter) func() {
-	bsp := sdktrace.NewBatchSpanProcessor(exporter)
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(bsp))
-	tp.ApplyConfig(
-		sdktrace.Config{
-			DefaultSampler: sdktrace.AlwaysSample(),
-		})
-	global.SetTextMapPropagator(
-		otel.NewCompositeTextMapPropagator(propagators.Baggage{}, propagators.TraceContext{}),
-	)
+func initTrace() func() {
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	exporter, err := texporter.NewExporter(texporter.WithProjectID(projectID))
+	if err != nil {
+		log.Fatalf("texporter.NewExporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	if err != nil {
+		log.Fatal(err)
+	}
 	global.SetTracerProvider(tp)
-	return bsp.Shutdown
+	return func() {
+		exporter.Shutdown(context.Background())
+	}
 }
 
 type Session interface {

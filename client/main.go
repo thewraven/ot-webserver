@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
@@ -13,15 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/honeycombio/opentelemetry-exporter-go/honeycomb"
-
+	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/api/global"
-	"go.opentelemetry.io/otel/propagators"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-
 	"go.opentelemetry.io/otel/label"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 const (
@@ -36,7 +34,7 @@ type User struct {
 
 func main() {
 	rand.Seed(time.Now().Unix())
-	closeTracer := initTracer(initHoneycomb())
+	closeTracer := initTrace()
 	defer closeTracer()
 	cl := &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
@@ -136,6 +134,23 @@ func getFib(ctx context.Context, cl http.Client, u User) (int, error) {
 	return strconv.Atoi(string(body))
 }
 
+func initTrace() func() {
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	exporter, err := texporter.NewExporter(texporter.WithProjectID(projectID))
+	if err != nil {
+		log.Fatalf("texporter.NewExporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	if err != nil {
+		log.Fatal(err)
+	}
+	global.SetTracerProvider(tp)
+	return func() {
+		exporter.Shutdown(context.Background())
+	}
+}
+
+/*
 func initHoneycomb() *honeycomb.Exporter {
 	ex, err := honeycomb.NewExporter(
 		honeycomb.Config{
@@ -161,3 +176,4 @@ func initTracer(exporter *honeycomb.Exporter) func() {
 	global.SetTracerProvider(tp)
 	return bsp.Shutdown
 }
+*/
