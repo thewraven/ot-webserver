@@ -76,7 +76,7 @@ func main() {
 	cl := initTracer()
 	defer cl()
 	mux := http.NewServeMux()
-	fib := fib.NewWithTracing(fib.NewCached(fib.New()))
+	fib := fib.NewWithTracing(fib.NewCached())
 	sess := initSession()
 	db, err := sqlite.New()
 	if err != nil {
@@ -101,6 +101,7 @@ func initTracer() func() {
 	return func() { otel.Shutdown() }
 }
 
+//Session is an storage used for authentication purposes
 type Session interface {
 	Save(ctx context.Context, k string, v []byte) error
 	Get(ctx context.Context, k string) ([]byte, error)

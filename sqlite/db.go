@@ -18,6 +18,7 @@ type Conn struct {
 	db *gorm.DB
 }
 
+//New creates an sqlite3 connection with tracing enabled
 func New() (*Conn, error) {
 	db, err := gorm.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -38,6 +39,7 @@ var users = []Users{
 	{ID: "user4", Name: "Denisse"},
 }
 
+//FillDB registers a list of default users of the service
 func (c *Conn) FillDB(ctx context.Context) error {
 	ctx, span := global.Tracer(componentName).Start(ctx, "Creating users in database")
 	defer span.End()
@@ -59,6 +61,7 @@ type Users struct {
 	Key  string `gorm:"key,omitempty",json:"key"`
 }
 
+//FindUser searchs a user by id, using SQL raw syntax
 func (c *Conn) FindUser(ctx context.Context, id string) (*Users, error) {
 	ctx, span := global.Tracer(componentName).Start(ctx, "Finding users")
 	defer span.End()
