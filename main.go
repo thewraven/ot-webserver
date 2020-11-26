@@ -11,11 +11,11 @@ import (
 
 	"github.com/honeycombio/opentelemetry-exporter-go/honeycomb"
 	"github.com/thewraven/ot-webserver/cache"
+	"github.com/thewraven/ot-webserver/fib"
 	"github.com/thewraven/ot-webserver/sqlite"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/api/global"
-	"go.opentelemetry.io/otel/api/trace"
 	"go.opentelemetry.io/otel/label"
 	"go.opentelemetry.io/otel/propagators"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -24,54 +24,11 @@ import (
 var serviceName = os.Getenv("SERVICE_NAME")
 var addr = ":9090"
 
-type Fibbonaccier interface {
-	Fib(ctx context.Context, n int) int
+func addInstrumentation(name string, fn http.HandlerFunc) http.Handler {
+	return otelhttp.NewHandler(http.HandlerFunc(fn), name)
 }
 
-type cachedFib struct {
-	impl   Fibbonaccier
-	values map[int]int
-}
-
-func NewCached(real Fibbonaccier) Fibbonaccier {
-	return cachedFib{impl: real, values: make(map[int]int)}
-}
-
-func (c cachedFib) Fib(ctx context.Context, n int) int {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "cachedSpan")
-	defer span.End()
-	if v, ok := c.values[n]; ok {
-		span.AddEvent(ctx, "value cached", label.Int("f", n))
-		return v
-	}
-	v := c.impl.Fib(ctx, n)
-	c.values[n] = v
-	return v
-}
-
-type mathFib struct{}
-
-func (mathFib) Fib(_ context.Context, n int) int {
-	a, b := 0, 1
-	for i := 0; i < n; i++ {
-		a, b = b, a+b
-	}
-	return b
-}
-
-type otFib struct {
-	ot Fibbonaccier
-}
-
-func (o otFib) Fib(ctx context.Context, n int) int {
-	span := trace.SpanFromContext(ctx)
-	_, span = span.Tracer().Start(ctx, "/fib invocation")
-	defer span.End()
-	span.SetAttributes(label.Int("Fib requested", n))
-	return o.ot.Fib(ctx, n)
-}
-
-func (o otFib) serveFib(s Session) http.HandlerFunc {
+func serveFib(o fib.Fibber, s Session) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, span := global.Tracer(serviceName).Start(r.Context(), "fibService")
 		defer span.End()
@@ -94,10 +51,6 @@ func (o otFib) serveFib(s Session) http.HandlerFunc {
 		out := o.Fib(r.Context(), f)
 		fmt.Fprint(w, out)
 	}
-}
-
-func addInstrumentation(name string, fn http.HandlerFunc) http.Handler {
-	return otelhttp.NewHandler(http.HandlerFunc(fn), name)
 }
 
 func login(s Session, conn *sqlite.Conn) http.HandlerFunc {
@@ -124,8 +77,7 @@ func main() {
 	cl := initTracer(initHoneycomb())
 	defer cl()
 	mux := http.NewServeMux()
-	cache := NewCached(mathFib{})
-	fb := otFib{ot: cache}
+	fib := fib.NewWithTracing(fib.NewCached(fib.New()))
 	sess := initSession()
 	db, err := sqlite.New()
 	if err != nil {
@@ -135,7 +87,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	mux.Handle("/fib", addInstrumentation("fibEndpoint", fb.serveFib(sess)))
+	mux.Handle("/fib", addInstrumentation("fibEndpoint", serveFib(fib, sess)))
 	mux.Handle("/login", addInstrumentation("login", login(sess, db)))
 	log.Println("Listening at address", addr)
 	http.ListenAndServe(addr, mux)
