@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -23,16 +22,16 @@ import (
 var serviceName = os.Getenv("SERVICE_NAME")
 var addr = ":9090"
 
-type Fibbonaccier interface {
+type Fibber interface {
 	Fib(ctx context.Context, n int) int
 }
 
 type cachedFib struct {
-	impl   Fibbonaccier
+	impl   Fibber
 	values map[int]int
 }
 
-func NewCached(real Fibbonaccier) Fibbonaccier {
+func NewCached(real Fibber) Fibber {
 	return cachedFib{impl: real, values: make(map[int]int)}
 }
 
@@ -59,7 +58,7 @@ func (mathFib) Fib(_ context.Context, n int) int {
 }
 
 type otFib struct {
-	ot Fibbonaccier
+	ot Fibber
 }
 
 func (o otFib) Fib(ctx context.Context, n int) int {
@@ -136,45 +135,6 @@ func main() {
 	}
 	mux.Handle("/fib", addInstrumentation("fibEndpoint", fb.serveFib(sess)))
 	mux.Handle("/login", addInstrumentation("login", login(sess, db)))
-	mux.Handle("/get", addInstrumentation("getData", func(w http.ResponseWriter, r *http.Request) {
-		d, err := sess.Get(r.Context(), r.URL.Query().Get("key"))
-		if err != nil {
-			span := trace.SpanFromContext(r.Context())
-			defer span.End(trace.WithRecord())
-			fmt.Fprintln(w, err.Error())
-			return
-		}
-		fmt.Fprintln(w, d)
-	}))
-	mux.Handle("/write", addInstrumentation("writeData", func(w http.ResponseWriter, r *http.Request) {
-		info, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			span := trace.SpanFromContext(r.Context())
-			defer span.End(trace.WithRecord())
-			fmt.Fprintln(w, err.Error())
-			return
-		}
-		k := r.URL.Query().Get("key")
-		err = sess.Save(r.Context(), k, info)
-		if err != nil {
-			span := trace.SpanFromContext(r.Context())
-			span.SetAttributes(label.String("unrecordedValue", k))
-			defer span.End(trace.WithRecord())
-			fmt.Fprintln(w, err.Error())
-			return
-		}
-		fmt.Fprintln(w, len(info), "bytes written")
-	}))
-
-	mux.Handle("/users", addInstrumentation("getUsers", func(w http.ResponseWriter, r *http.Request) {
-		u, err := db.FindUser(r.Context(), r.URL.Query().Get("id"))
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintln(w, err.Error())
-			return
-		}
-		json.NewEncoder(w).Encode(u)
-	}))
 	log.Println("Listening at address", addr)
 	http.ListenAndServe(addr, mux)
 }
