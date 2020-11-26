@@ -8,12 +8,10 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/honeycombio/opentelemetry-exporter-go/honeycomb"
 	"github.com/lightstep/otel-launcher-go/launcher"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -135,19 +133,7 @@ func getFib(ctx context.Context, cl http.Client, u User) (int, error) {
 	return strconv.Atoi(string(body))
 }
 
-func initHoneycomb() *honeycomb.Exporter {
-	ex, err := honeycomb.NewExporter(
-		honeycomb.Config{
-			APIKey: os.Getenv("HONEYCOMB_KEY"),
-		},
-		honeycomb.TargetingDataset("opentelemetry"))
-	if err != nil {
-		panic(err)
-	}
-	return ex
-}
-
 func initTracer() func() {
-	otel := launcher.ConfigureOpentelemetry()
-	return func() { otel.Shutdown() }
+	lightstep := launcher.ConfigureOpentelemetry()
+	return func() { lightstep.Shutdown() }
 }

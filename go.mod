@@ -5,7 +5,6 @@ go 1.15
 require (
 	github.com/bradfitz/gomemcache v0.0.0-20190913173617-a41fca850d0b
 	github.com/google/uuid v1.1.2
-	github.com/honeycombio/opentelemetry-exporter-go v0.13.0
 	github.com/jinzhu/gorm v1.9.16
 	github.com/lightstep/otel-launcher-go v0.13.0
 	github.com/sethvargo/go-envconfig v0.3.2 // indirect

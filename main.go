@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/honeycombio/opentelemetry-exporter-go/honeycomb"
 	"github.com/lightstep/otel-launcher-go/launcher"
 	"github.com/thewraven/ot-webserver/cache"
 	"github.com/thewraven/ot-webserver/sqlite"
@@ -19,12 +18,16 @@ import (
 	"go.opentelemetry.io/otel/label"
 )
 
-var serviceName = os.Getenv("SERVICE_NAME")
-var addr = ":9090"
+func addInstrumentation(name string, fn http.HandlerFunc) http.Handler {
+	return otelhttp.NewHandler(http.HandlerFunc(fn), name)
+}
 
 type Fibber interface {
 	Fib(ctx context.Context, n int) int
 }
+
+var serviceName = os.Getenv("SERVICE_NAME")
+var addr = ":9090"
 
 type cachedFib struct {
 	impl   Fibber
@@ -94,10 +97,6 @@ func (o otFib) serveFib(s Session) http.HandlerFunc {
 	}
 }
 
-func addInstrumentation(name string, fn http.HandlerFunc) http.Handler {
-	return otelhttp.NewHandler(http.HandlerFunc(fn), name)
-}
-
 func login(s Session, conn *sqlite.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, span := global.Tracer(serviceName).Start(r.Context(), "login")
@@ -141,16 +140,6 @@ func main() {
 
 func initSession() Session {
 	return cache.NewSession("localhost:11211", "sessionService")
-}
-func initHoneycomb() *honeycomb.Exporter {
-	ex, err := honeycomb.NewExporter(
-		honeycomb.Config{
-			APIKey: os.Getenv("HONEYCOMB_KEY"),
-		})
-	if err != nil {
-		panic(err)
-	}
-	return ex
 }
 
 func initTracer() func() {
