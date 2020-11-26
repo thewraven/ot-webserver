@@ -21,6 +21,6 @@ Se han creado referencias para distintos exporters de trazas, que se encuentran 
 
 Si cuentas con una cuenta de Honeycomb.io, puedes probar el servicio desde Docker:
 
-> docker run --rm -e HONEYCOMB_KEY=<TUKEY> docker.io/wraven/opentelemetry-webserver:honeycomb
+> docker run --rm -e LS_ACCESS_TOKEN=<TUKEY> docker.io/wraven/opentelemetry-webserver:lightstep
 
 Lo cual iniciará dentro del contenedor memcached, el servidor web y lo invocará a través del cliente instrumentado con telemetría.
